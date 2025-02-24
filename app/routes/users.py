@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.schemas.user import UserCreate, UserOut, UserUpdate, UserPasswordChange
+from app.schemas.user import UserCreate, UserOut, UserUpdate, UserPasswordChange, ForgotPasswordRequest  # Added ForgotPasswordRequest
 from app.crud import user as crud_user
 from app.models.role import Role
 import logging
@@ -128,11 +128,16 @@ def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db)):
     print(f"DEBUG: User updated: {response}", file=sys.stderr)
     return response
 
-@router.put("/{user_id}/password", response_model=UserOut)
-def change_user_password(user_id: int, user: UserPasswordChange, db: Session = Depends(get_db)):
-    db_user = crud_user.get_user(db, user_id)
+@router.post("/change-password", response_model=UserOut)
+def change_user_password(user: UserPasswordChange, db: Session = Depends(get_db)):
+    logger.debug(f"Password change request for username: {user.username}")
+    
+    # Validate that the username exists
+    db_user = crud_user.get_user_by_username(db, user.username)
     if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Username not found")
+    
+    # Password confirmation is already validated by Pydantic
     db_user.set_password(user.password)
     db.commit()
     db.refresh(db_user)
@@ -147,3 +152,14 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     db.delete(db_user)
     db.commit()
     return {"detail": "User deleted"}
+
+@router.post("/forgot-password", response_model=dict)
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    logger.debug(f"Forgot password request for email: {req.email}")
+    
+    from app.models.user import User
+    db_user = db.query(User).filter(User.email == req.email).first()
+    if db_user:
+        return {"detail": "Email is valid"}
+    
+    raise HTTPException(status_code=404, detail="Email is invalid")

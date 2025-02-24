@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import List, Optional
 
 class UserBase(BaseModel):
@@ -21,4 +21,15 @@ class UserUpdate(BaseModel):  # No inheritance from UserBase
     roles: Optional[List[int]] = None
 
 class UserPasswordChange(BaseModel):
+    username: str
     password: str
+    password_confirmation: str
+
+    @field_validator('password_confirmation')
+    def passwords_match(cls, v, info):
+        if 'password' in info.data and v != info.data['password']:
+            raise ValueError('Passwords do not match')
+        return v
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr

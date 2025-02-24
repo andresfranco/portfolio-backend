@@ -38,9 +38,20 @@ logger.debug("Application starting up")
 # Exception handlers
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    # Convert non-serializable objects in error context to string
+    for error in errors:
+        if 'ctx' in error and isinstance(error['ctx'], dict):
+            for key, value in error['ctx'].items():
+                try:
+                    _ = value.__str__()
+                except Exception:
+                    error['ctx'][key] = str(value)
+                else:
+                    error['ctx'][key] = str(value)
     logger.error(f"Validation error: {exc.errors()}")
     print(f"Validation error: {exc.errors()}", file=sys.stderr)
-    return JSONResponse(status_code=400, content={"detail": exc.errors(), "body": exc.body})
+    return JSONResponse(status_code=400, content={"detail": errors, "body": exc.body})
 
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
