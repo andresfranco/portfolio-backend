@@ -5,6 +5,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware  # Add CORS middleware
 from sqlalchemy.exc import SQLAlchemyError
 
 # Print sys.path for debugging
@@ -18,12 +19,22 @@ print(f"Added to sys.path: {os.path.abspath(os.path.join(os.path.dirname(__file_
 try:
     from app.routes.users import router as users_router
     from app.routes.roles import router as roles_router
+    from app.routes.email import router as email_router  # Add email router import
     print("Imports successful", file=sys.stderr)
 except ImportError as e:
     print(f"Import error: {e}", file=sys.stderr)
     raise
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)  # "__main__" here
@@ -68,6 +79,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Include routers
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(roles_router, prefix="/api/roles", tags=["Roles"])
+app.include_router(email_router, prefix="/api/email", tags=["Email"])  # Add email router
 logger.debug("Routers included")
 
 # Routes

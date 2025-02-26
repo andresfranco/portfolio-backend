@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import List, Optional
+from typing import List, Optional, Dict, Any  # Added Any import
 
 class UserBase(BaseModel):
     username: str
@@ -11,14 +11,14 @@ class UserCreate(UserBase):
 
 class UserOut(UserBase):
     id: int
-    roles: List[int] = []
+    roles: List[Dict[str, Any]] = []  # Changed 'any' to 'Any'
     class Config:
         from_attributes = True  # Pydantic V2 compatibility
 
-class UserUpdate(BaseModel):  # No inheritance from UserBase
+class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
-    roles: Optional[List[int]] = None
+    roles: Optional[List[int]] = None  # Now will accept just a roles array
 
 class UserPasswordChange(BaseModel):
     username: str

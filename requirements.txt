@@ -1,2 +1,11 @@
-FastAPI
+fastapi
 uvicorn
+sqlalchemy
+alembic
+passlib[bcrypt]
+python-jose[cryptography]
+python-multipart
+email-validator
+pydantic
+pydantic-settings
+python-dotenv
