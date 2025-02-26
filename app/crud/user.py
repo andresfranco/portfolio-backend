@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import asc, desc, or_
 from app.models.user import User
 from app.models.role import Role
-from app.schemas.user import UserCreate
+from app.schemas.user import UserCreate, Filter
 from passlib.context import CryptContext
+from typing import List, Optional, Tuple
 import logging
 import sys
 
@@ -54,3 +56,46 @@ def get_users(db: Session, skip: int = 0, limit: int = 100):
     logger.debug(f"Fetching users with skip={skip}, limit={limit}")
     print(f"DEBUG: Fetching users with skip={skip}, limit={limit}", file=sys.stderr)
     return db.query(User).offset(skip).limit(limit).all()
+
+def get_users_paginated(
+    db: Session,
+    page: int = 1,
+    page_size: int = 10,
+    filters: List[Filter] = None,
+    sort_field: str = None,
+    sort_order: str = "asc"
+) -> Tuple[List[User], int]:
+    query = db.query(User)
+    
+    # Apply multiple filters if specified
+    if filters:
+        filter_conditions = []
+        for filter_item in filters:
+            if hasattr(User, filter_item.field):
+                column = getattr(User, filter_item.field)
+                if filter_item.operator == "contains":
+                    filter_conditions.append(column.ilike(f"%{filter_item.value}%"))
+                elif filter_item.operator == "equals":
+                    filter_conditions.append(column == filter_item.value)
+                elif filter_item.operator == "startsWith":
+                    filter_conditions.append(column.ilike(f"{filter_item.value}%"))
+                elif filter_item.operator == "endsWith":
+                    filter_conditions.append(column.ilike(f"%{filter_item.value}"))
+        
+        if filter_conditions:
+            # Combine all filters with AND operation
+            query = query.filter(*filter_conditions)
+    
+    # Get total count before pagination
+    total = query.count()
+    
+    # Apply sorting if specified
+    if sort_field and hasattr(User, sort_field):
+        sort_func = asc if sort_order == "asc" else desc
+        query = query.order_by(sort_func(getattr(User, sort_field)))
+    
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+    
+    return query.all(), total

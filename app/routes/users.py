@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.schemas.user import UserCreate, UserOut, UserUpdate, UserPasswordChange, ForgotPasswordRequest
+from app.schemas.user import UserCreate, UserOut, UserUpdate, UserPasswordChange, ForgotPasswordRequest, PaginatedUserResponse, Filter
 from app.crud import user as crud_user
 from app.models.role import Role
+from typing import Optional, List
 import logging
 import sys
 
@@ -61,6 +62,66 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     
     return response
 
+@router.get("/", response_model=List[str])
+def list_users(
+    db: Session = Depends(get_db)
+):
+    """Get list of all usernames"""
+    logger.debug("Fetching all usernames")
+    users = crud_user.get_users(db)
+    return [user.username for user in users]
+
+@router.get("/full", response_model=PaginatedUserResponse)
+def read_users(
+    page: int = Query(1, gt=0),
+    pageSize: int = Query(10, gt=0, le=100),
+    filterField: Optional[List[str]] = Query(None),
+    filterValue: Optional[List[str]] = Query(None),
+    filterOperator: Optional[List[str]] = Query(None),
+    sortField: Optional[str] = None,
+    sortOrder: Optional[str] = Query(None, regex="^(asc|desc)$"),
+    db: Session = Depends(get_db)
+):
+    """Get paginated list of users with full details"""
+    logger.debug(f"Fetching users with page={page}, pageSize={pageSize}, filters={filterField}, values={filterValue}, operators={filterOperator}, sort={sortField} {sortOrder}")
+    
+    parsed_filters = []
+    if filterField and filterValue:
+        # Zip the filter parameters together, using 'contains' as default operator if not provided
+        operators = filterOperator if filterOperator else ['contains'] * len(filterField)
+        for field, value, operator in zip(filterField, filterValue, operators):
+            try:
+                parsed_filters.append(Filter.from_params(field=field, value=value, operator=operator))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+    
+    users, total = crud_user.get_users_paginated(
+        db,
+        page=page,
+        page_size=pageSize,
+        filters=parsed_filters or None,
+        sort_field=sortField,
+        sort_order=sortOrder
+    )
+    
+    response = {
+        "items": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "roles": [{"id": role.id, "name": role.name} for role in user.roles] if user.roles else []
+            }
+            for user in users
+        ],
+        "total": total,
+        "page": page,
+        "pageSize": pageSize
+    }
+    
+    logger.debug(f"Users fetched: {response}")
+    return response
+
 @router.get("/{user_id}", response_model=UserOut)
 def read_user(user_id: int, db: Session = Depends(get_db)):
     db_user = crud_user.get_user(db, user_id)
@@ -68,25 +129,6 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     roles = [{"id": role.id, "name": role.name} for role in db_user.roles] if db_user.roles else []
     return {"id": db_user.id, "username": db_user.username, "email": db_user.email, "roles": roles}
-
-@router.get("/", response_model=list[UserOut])
-def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    logger.debug(f"Fetching users with skip={skip}, limit={limit}")
-    print(f"DEBUG: Fetching users with skip={skip}, limit={limit}", file=sys.stderr)
-    
-    users = crud_user.get_users(db, skip=skip, limit=limit)
-    response = [
-        {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "roles": [{"id": role.id, "name": role.name} for role in user.roles] if user.roles else []
-        }
-        for user in users
-    ]
-    logger.debug(f"Users fetched: {response}")
-    print(f"DEBUG: Users fetched: {response}", file=sys.stderr)
-    return response
 
 @router.put("/{user_id}", response_model=UserOut)
 def update_user(user_id: int, user: UserUpdate, db: Session = Depends(get_db)):
@@ -154,7 +196,7 @@ def change_user_password(user: UserPasswordChange, db: Session = Depends(get_db)
     db_user.set_password(user.password)
     db.commit()
     db.refresh(db_user)
-    roles = [role.id for role in db_user.roles] if db_user.roles else []
+    roles = [{"id": role.id, "name": role.name} for role in db_user.roles] if db_user.roles else []
     return {"id": db_user.id, "username": db_user.username, "email": db_user.email, "roles": roles}
 
 @router.delete("/{user_id}", response_model=dict)

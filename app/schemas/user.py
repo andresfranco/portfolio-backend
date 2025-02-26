@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import List, Optional, Dict, Any  # Added Any import
+from typing import List, Optional, Dict, Any, Union, Literal
 
 class UserBase(BaseModel):
     username: str
@@ -11,14 +11,14 @@ class UserCreate(UserBase):
 
 class UserOut(UserBase):
     id: int
-    roles: List[Dict[str, Any]] = []  # Changed 'any' to 'Any'
+    roles: List[Dict[str, Any]] = []
     class Config:
-        from_attributes = True  # Pydantic V2 compatibility
+        from_attributes = True
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
-    roles: Optional[List[int]] = None  # Now will accept just a roles array
+    roles: Optional[List[int]] = None
 
 class UserPasswordChange(BaseModel):
     username: str
@@ -33,3 +33,18 @@ class UserPasswordChange(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+class Filter(BaseModel):
+    field: str
+    value: str
+    operator: Literal["contains", "equals", "startsWith", "endsWith"] = "contains"
+
+    @classmethod
+    def from_params(cls, field: str, value: str, operator: str = "contains") -> "Filter":
+        return cls(field=field, value=value, operator=operator)
+
+class PaginatedUserResponse(BaseModel):
+    items: List[UserOut]
+    total: int
+    page: int
+    pageSize: int
