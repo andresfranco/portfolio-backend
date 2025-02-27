@@ -60,7 +60,14 @@ def read_roles(
         operators = filterOperator if filterOperator else ['contains'] * len(filterField)
         for field, value, operator in zip(filterField, filterValue, operators):
             try:
-                parsed_filters.append(RoleFilter.from_params(field=field, value=value, operator=operator))
+                # Handle permission filter specially
+                if field == 'permission':
+                    parsed_filters.append(RoleFilter.from_params(field='permission', value=value, operator=operator))
+                elif field == 'permissions':
+                    # This is the old way, but we'll handle it for backward compatibility
+                    parsed_filters.append(RoleFilter.from_params(field='permission', value=value, operator=operator))
+                else:
+                    parsed_filters.append(RoleFilter.from_params(field=field, value=value, operator=operator))
             except ValueError as e:
                 logger.error(f"Invalid filter parameters: {str(e)}")
                 raise HTTPException(status_code=400, detail=str(e))

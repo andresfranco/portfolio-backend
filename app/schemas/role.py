@@ -28,6 +28,15 @@ class RoleFilter(BaseModel):
 
     @classmethod
     def from_params(cls, field: str, value: str, operator: str = "contains") -> "RoleFilter":
+        # Validate that field is a valid field name
+        valid_fields = ["name", "description", "permission"]
+        if field not in valid_fields and field != "permissions":  # Allow "permissions" for backward compatibility
+            raise ValueError(f"Invalid filter field: {field}. Valid fields are: {valid_fields}")
+            
+        # Convert "permissions" to "permission" for consistency
+        if field == "permissions":
+            field = "permission"
+            
         return cls(field=field, value=value, operator=operator)
 
 class PaginatedRoleResponse(BaseModel):
