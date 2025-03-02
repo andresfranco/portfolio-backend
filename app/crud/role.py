@@ -158,22 +158,9 @@ def get_roles_paginated(
             
         # Handle permission filters separately using joins
         if permission_filters:
-            from app.models.permission import Permission, role_permissions
-            from sqlalchemy import and_, or_
-            
-            # Join with permissions table
-            query = query.join(Role.permissions)
-            
-            # Create OR conditions for each permission
-            permission_conditions = []
+            from app.models.permission import Permission
             for permission_name in permission_filters:
-                permission_conditions.append(Permission.name == permission_name)
-                
-            # Apply the OR conditions
-            if permission_conditions:
-                query = query.filter(or_(*permission_conditions))
-                
-            # Make sure we get distinct roles to avoid duplicates
+                query = query.filter(Role.permissions.any(Permission.name == permission_name))
             query = query.distinct()
     
     # Get total count before pagination
