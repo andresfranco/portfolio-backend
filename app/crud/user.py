@@ -67,34 +67,39 @@ def get_users_paginated(
 ) -> Tuple[List[User], int]:
     query = db.query(User)
     
-    # Apply multiple filters if specified
+    # Separate role filters from other filters
+    role_filter_values = []
+    other_filters = []
+    
     if filters:
-        filter_conditions = []
         for filter_item in filters:
-            if hasattr(User, filter_item.field):
+            if filter_item.field == "role":  # expecting the client to send "role" as the field
+                role_filter_values.append(filter_item.value)
+            elif hasattr(User, filter_item.field):
                 column = getattr(User, filter_item.field)
                 if filter_item.operator == "contains":
-                    filter_conditions.append(column.ilike(f"%{filter_item.value}%"))
+                    other_filters.append(column.ilike(f"%{filter_item.value}%"))
                 elif filter_item.operator == "equals":
-                    filter_conditions.append(column == filter_item.value)
+                    other_filters.append(column == filter_item.value)
                 elif filter_item.operator == "startsWith":
-                    filter_conditions.append(column.ilike(f"{filter_item.value}%"))
+                    other_filters.append(column.ilike(f"{filter_item.value}%"))
                 elif filter_item.operator == "endsWith":
-                    filter_conditions.append(column.ilike(f"%{filter_item.value}"))
-        
-        if filter_conditions:
-            # Combine all filters with AND operation
-            query = query.filter(*filter_conditions)
+                    other_filters.append(column.ilike(f"%{filter_item.value}"))
     
-    # Get total count before pagination
+    if other_filters:
+        query = query.filter(*other_filters)
+    
+    if role_filter_values:
+        # Join with roles and apply OR logic: include users who have any of the selected roles
+        conditions = [Role.id == int(role_id) for role_id in role_filter_values]
+        query = query.join(User.roles).filter(or_(*conditions)).distinct()
+    
     total = query.count()
     
-    # Apply sorting if specified
     if sort_field and hasattr(User, sort_field):
         sort_func = asc if sort_order == "asc" else desc
         query = query.order_by(sort_func(getattr(User, sort_field)))
     
-    # Apply pagination
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     
