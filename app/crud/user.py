@@ -73,7 +73,9 @@ def get_users_paginated(
     
     if filters:
         for filter_item in filters:
-            if filter_item.field == "role":  # expecting the client to send "role" as the field
+            # Check for both "role" and "roles" fields for role filtering
+            if filter_item.field == "role" or filter_item.field == "roles":
+                logger.debug(f"Found role filter with value: {filter_item.value}")
                 role_filter_values.append(filter_item.value)
             elif hasattr(User, filter_item.field):
                 column = getattr(User, filter_item.field)
@@ -90,6 +92,7 @@ def get_users_paginated(
         query = query.filter(*other_filters)
     
     if role_filter_values:
+        logger.debug(f"Filtering by roles: {role_filter_values}")
         # Join with roles and apply OR logic: include users who have any of the selected roles
         conditions = [Role.id == int(role_id) for role_id in role_filter_values]
         query = query.join(User.roles).filter(or_(*conditions)).distinct()
