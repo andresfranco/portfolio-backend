@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Any
 import os
+from datetime import timedelta
 
 class Settings(BaseSettings):
     # Database settings
@@ -16,7 +17,11 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = os.getenv("SMTP_TLS")
     SMTP_SSL: bool = os.getenv("SMTP_SSL")
     
-    SECRET_KEY: str = "your_secret_key"
+    # Security settings
+    SECRET_KEY: str = "your_secret_key_here_replace_in_production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
     ALLOWED_HOSTS: list[str] = ["*"]
     DEBUG: bool = True
 

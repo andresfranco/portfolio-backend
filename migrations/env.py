@@ -13,7 +13,16 @@ from app.core.database import Base  # Ensure Base includes your models
 # Import models so they register with Base.metadata
 import app.models.user  
 import app.models.role  
-# ...import other models if needed...
+# Import all other models
+import app.models.category
+import app.models.experience
+import app.models.language
+import app.models.permission
+import app.models.portfolio
+import app.models.project
+import app.models.section
+import app.models.skill
+import app.models.translation
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

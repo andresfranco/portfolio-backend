@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Table, ForeignKey, DateTime  # added DateTime
+from sqlalchemy import Column, Integer, String, Table, ForeignKey, DateTime, Boolean  
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func  # added func for timestamp defaults
+from sqlalchemy.sql import func  
 from app.core.database import Base
 from passlib.context import CryptContext
 

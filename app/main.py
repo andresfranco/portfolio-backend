@@ -8,7 +8,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware  # Add CORS middleware
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.routes import users, roles, permissions
 from app.core.database import SessionLocal
 from app.crud.permission import initialize_core_permissions
 
@@ -21,10 +20,8 @@ print(f"Added to sys.path: {os.path.abspath(os.path.join(os.path.dirname(__file_
 
 # Verify imports
 try:
-    from app.routes.users import router as users_router
-    from app.routes.roles import router as roles_router
-    from app.routes.email import router as email_router  # Add email router import
-    print("Imports successful", file=sys.stderr)
+    from app.api.router import api_router
+    print("API router import successful", file=sys.stderr)
 except ImportError as e:
     print(f"Import error: {e}", file=sys.stderr)
     raise
@@ -87,12 +84,9 @@ async def value_error_handler(request: Request, exc: ValueError):
         content={"detail": str(exc)},
     )
 
-# Include routers
-app.include_router(users.router, prefix="/api/users", tags=["Users"])
-app.include_router(roles.router, prefix="/api/roles", tags=["Roles"])
-app.include_router(email_router, prefix="/api/email", tags=["Email"])  # Add email router
-app.include_router(permissions.router, prefix="/api/permissions", tags=["Permissions"])
-logger.debug("Routers included")
+# Include API router
+app.include_router(api_router, prefix="/api")
+logger.debug("API router included with prefix '/api'")
 
 @app.on_event("startup")
 async def startup_event():
