@@ -6,10 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware  # Add CORS middleware
+from fastapi.staticfiles import StaticFiles  # Import StaticFiles for serving static content
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import SessionLocal
 from app.crud.permission import initialize_core_permissions
+from app.utils.file_utils import ensure_upload_dirs  # Import to ensure upload directories exist
 
 # Print sys.path for debugging
 print(f"sys.path: {sys.path}", file=sys.stderr)
@@ -95,10 +97,18 @@ async def startup_event():
     try:
         initialize_core_permissions(db)
         logger.debug("Core permissions initialized successfully")
+        
+        # Ensure upload directories exist
+        ensure_upload_dirs()
+        logger.debug("Upload directories initialized successfully")
     except Exception as e:
-        logger.error(f"Error initializing core permissions: {str(e)}")
+        logger.error(f"Error during startup: {str(e)}")
     finally:
         db.close()
+
+# Mount static files directory for serving uploads
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+logger.debug("Static files mounted at /uploads")
 
 # Routes
 @app.get("/")

@@ -4,10 +4,10 @@ from typing import List, Optional, Dict, Any, Union, Literal
 class LanguageBase(BaseModel):
     code: str
     name: str
-    image: str
     is_default: bool = False
 
 class LanguageCreate(LanguageBase):
+    # Image will be handled separately as a file upload
     pass
 
 class LanguageUpdate(BaseModel):
@@ -16,8 +16,12 @@ class LanguageUpdate(BaseModel):
     image: Optional[str] = None
     is_default: Optional[bool] = None
 
-class LanguageOut(LanguageBase):
+class LanguageOut(BaseModel):
     id: int
+    code: str
+    name: str
+    image: str
+    is_default: bool
     
     class Config:
         from_attributes = True
