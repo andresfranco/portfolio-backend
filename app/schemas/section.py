@@ -1,6 +1,14 @@
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Union, Literal
 
+class LanguageBase(BaseModel):
+    id: int
+    code: str
+    name: str
+    
+    class Config:
+        from_attributes = True
+
 class SectionTextBase(BaseModel):
     language_id: int
     text: str
@@ -14,7 +22,7 @@ class SectionTextUpdate(BaseModel):
 
 class SectionTextOut(SectionTextBase):
     id: int
-    language: Dict[str, Any]
+    language: LanguageBase
     
     class Config:
         from_attributes = True
@@ -29,7 +37,7 @@ class SectionUpdate(BaseModel):
     code: Optional[str] = None
     section_texts: Optional[List[SectionTextCreate]] = None
 
-class SectionOut(SectionBase):
+class Section(SectionBase):
     id: int
     section_texts: List[SectionTextOut] = []
     
@@ -46,7 +54,11 @@ class Filter(BaseModel):
         return cls(field=field, value=value, operator=operator)
 
 class PaginatedSectionResponse(BaseModel):
-    items: List[SectionOut]
+    items: List[Section]
     total: int
     page: int
     pageSize: int
+
+class UniqueCheckResponse(BaseModel):
+    exists: bool
+    code: str
