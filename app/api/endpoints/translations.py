@@ -4,6 +4,8 @@ from typing import Any, List, Optional
 from app.crud import translation as translation_crud
 from app.api import deps
 from app.schemas.translation import TranslationOut as Translation, PaginatedTranslationResponse, TranslationCreate, TranslationUpdate
+from app.models.translation import Translation as TranslationModel
+from app.models.language import Language
 import logging
 import sys
 
@@ -110,19 +112,21 @@ def create_translation(
     """
     logger.debug(f"Creating translation with identifier: {translation_in.identifier}")
     
-    # Check if translation with this identifier already exists
-    existing_translation = translation_crud.get_translation_by_identifier(db, identifier=translation_in.identifier)
-    if existing_translation:
+    # The uniqueness check is now handled in the CRUD function based on identifier + language combination
+    # No need to check only by identifier here
+    
+    try:
+        new_translation = translation_crud.create_translation(db, translation=translation_in)
+        db.commit()
+        db.refresh(new_translation)
+        logger.debug(f"Translation created successfully with ID: {new_translation.id}")
+        return new_translation
+    except ValueError as e:
+        logger.error(f"Error creating translation: {str(e)}")
         raise HTTPException(
             status_code=400,
-            detail="The translation with this identifier already exists in the system.",
+            detail=str(e),
         )
-    
-    new_translation = translation_crud.create_translation(db, translation=translation_in)
-    db.commit()
-    db.refresh(new_translation)
-    logger.debug(f"Translation created successfully with ID: {new_translation.id}")
-    return new_translation
 
 
 @router.get("/{translation_id}", response_model=Translation)
@@ -164,20 +168,21 @@ def update_translation(
             detail="Translation not found",
         )
     
-    # If updating identifier, check it doesn't conflict with existing translations
-    if translation_in.identifier and translation_in.identifier != translation_obj.identifier:
-        existing_translation = translation_crud.get_translation_by_identifier(db, identifier=translation_in.identifier)
-        if existing_translation:
-            raise HTTPException(
-                status_code=400,
-                detail="The translation with this identifier already exists in the system.",
-            )
+    # The uniqueness check is now handled in the CRUD function based on identifier + language combination
+    # No need to check only by identifier here
     
-    updated_translation = translation_crud.update_translation(db, translation_id=translation_id, translation=translation_in)
-    db.commit()
-    db.refresh(updated_translation)
-    logger.debug(f"Translation updated successfully: {updated_translation.id}")
-    return updated_translation
+    try:
+        updated_translation = translation_crud.update_translation(db, translation_id=translation_id, translation=translation_in)
+        db.commit()
+        db.refresh(updated_translation)
+        logger.debug(f"Translation updated successfully: {translation_id}")
+        return updated_translation
+    except ValueError as e:
+        logger.error(f"Error updating translation: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
 
 
 @router.delete("/{translation_id}", response_model=Translation)
@@ -202,3 +207,38 @@ def delete_translation(
     db.commit()
     logger.debug(f"Translation deleted successfully: {translation_id}")
     return deleted_translation
+
+
+@router.get("/check-unique", response_model=dict)
+def check_translation_unique(
+    identifier: str,
+    language_id: int,
+    exclude_id: Optional[int] = None,
+    db: Session = Depends(deps.get_db),
+) -> Any:
+    """
+    Check if a translation with the given identifier and language_id already exists.
+    """
+    logger.debug(f"Checking uniqueness for identifier={identifier}, language_id={language_id}, exclude_id={exclude_id}")
+    
+    try:
+        query = db.query(TranslationModel).join(
+            TranslationModel.language
+        ).filter(
+            TranslationModel.identifier == identifier,
+            Language.id == language_id
+        )
+        
+        if exclude_id:
+            query = query.filter(TranslationModel.id != exclude_id)
+        
+        exists = query.first() is not None
+        
+        logger.debug(f"Uniqueness check result: exists={exists}")
+        return {"exists": exists}
+    except Exception as e:
+        logger.error(f"Error checking uniqueness: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking uniqueness: {str(e)}"
+        )

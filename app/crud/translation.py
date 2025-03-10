@@ -27,7 +27,27 @@ def get_translation_by_identifier(db: Session, identifier: str):
     return db.query(Translation).options(joinedload(Translation.language)).filter(Translation.identifier == identifier).first()
 
 def create_translation(db: Session, translation: TranslationCreate):
-    logger.debug(f"Starting translation creation for {translation.identifier}")
+    logger.debug(f"Creating translation with identifier: {translation.identifier}")
+    
+    # Check if a translation with the same identifier and language already exists
+    for language_id in translation.languages:
+        logger.debug(f"Fetching translation by identifier: {translation.identifier} and language_id: {language_id}")
+        
+        # Get the language name for better error messages
+        language = db.query(Language).filter(Language.id == language_id).first()
+        if not language:
+            raise ValueError(f"Language with ID {language_id} not found")
+        
+        existing_translation = db.query(Translation).join(
+            Translation.language
+        ).filter(
+            Translation.identifier == translation.identifier,
+            Language.id == language_id
+        ).first()
+        
+        if existing_translation:
+            logger.warning(f"Translation with identifier {translation.identifier} and language {language.name} already exists")
+            raise ValueError(f"Translation with identifier '{translation.identifier}' and language '{language.name}' already exists. The combination of identifier and language must be unique.")
     
     # Fetch the languages
     languages = db.query(Language).filter(Language.id.in_(translation.languages)).all()
@@ -52,6 +72,62 @@ def update_translation(db: Session, translation_id: int, translation: Translatio
     
     if not db_translation:
         return None
+    
+    # If both identifier and languages are being updated, check for uniqueness
+    if translation.identifier is not None and translation.languages is not None:
+        for language_id in translation.languages:
+            # Get the language name for better error messages
+            language = db.query(Language).filter(Language.id == language_id).first()
+            if not language:
+                raise ValueError(f"Language with ID {language_id} not found")
+                
+            # Check if another translation with the same identifier and language exists
+            existing_translation = db.query(Translation).join(
+                Translation.language
+            ).filter(
+                Translation.identifier == translation.identifier,
+                Language.id == language_id,
+                Translation.id != translation_id  # Exclude the current translation
+            ).first()
+            
+            if existing_translation:
+                logger.warning(f"Another translation with identifier {translation.identifier} and language {language.name} already exists")
+                raise ValueError(f"Translation with identifier '{translation.identifier}' and language '{language.name}' already exists. The combination of identifier and language must be unique.")
+    
+    # If only identifier is being updated but languages remain the same
+    elif translation.identifier is not None:
+        for language in db_translation.language:
+            existing_translation = db.query(Translation).join(
+                Translation.language
+            ).filter(
+                Translation.identifier == translation.identifier,
+                Language.id == language.id,
+                Translation.id != translation_id  # Exclude the current translation
+            ).first()
+            
+            if existing_translation:
+                logger.warning(f"Another translation with identifier {translation.identifier} and language {language.name} already exists")
+                raise ValueError(f"Translation with identifier '{translation.identifier}' and language '{language.name}' already exists. The combination of identifier and language must be unique.")
+    
+    # If only languages are being updated but identifier remains the same
+    elif translation.languages is not None:
+        for language_id in translation.languages:
+            # Get the language name for better error messages
+            language = db.query(Language).filter(Language.id == language_id).first()
+            if not language:
+                raise ValueError(f"Language with ID {language_id} not found")
+                
+            existing_translation = db.query(Translation).join(
+                Translation.language
+            ).filter(
+                Translation.identifier == db_translation.identifier,
+                Language.id == language_id,
+                Translation.id != translation_id  # Exclude the current translation
+            ).first()
+            
+            if existing_translation:
+                logger.warning(f"Another translation with identifier {db_translation.identifier} and language {language.name} already exists")
+                raise ValueError(f"Translation with identifier '{db_translation.identifier}' and language '{language.name}' already exists. The combination of identifier and language must be unique.")
     
     # Update fields if provided
     if translation.identifier is not None:
