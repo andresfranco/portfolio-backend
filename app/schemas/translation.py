@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Union, Literal
+from app.schemas.language import LanguageOut
 
 class TranslationBase(BaseModel):
     identifier: str
@@ -15,7 +16,7 @@ class TranslationUpdate(BaseModel):
 
 class TranslationOut(TranslationBase):
     id: int
-    languages: List[Dict[str, Any]] = []
+    language: List[LanguageOut] = []  # Match the model's relationship name
     
     class Config:
         from_attributes = True

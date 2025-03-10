@@ -1,9 +1,9 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import asc, desc, or_
-from app.models.translation import Translation
+from typing import List, Optional, Tuple
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, asc, desc
+from app.models.translation import Translation, translation_languages
 from app.models.language import Language
 from app.schemas.translation import TranslationCreate, TranslationUpdate, Filter
-from typing import List, Optional, Tuple
 import logging
 import sys
 
@@ -20,11 +20,11 @@ if not logger.handlers:
 # CRUD Functions
 def get_translation(db: Session, translation_id: int):
     logger.debug(f"Fetching translation with ID {translation_id}")
-    return db.query(Translation).filter(Translation.id == translation_id).first()
+    return db.query(Translation).options(joinedload(Translation.language)).filter(Translation.id == translation_id).first()
 
 def get_translation_by_identifier(db: Session, identifier: str):
     logger.debug(f"Fetching translation by identifier: {identifier}")
-    return db.query(Translation).filter(Translation.identifier == identifier).first()
+    return db.query(Translation).options(joinedload(Translation.language)).filter(Translation.identifier == identifier).first()
 
 def create_translation(db: Session, translation: TranslationCreate):
     logger.debug(f"Starting translation creation for {translation.identifier}")
@@ -83,54 +83,71 @@ def delete_translation(db: Session, translation_id: int):
 
 def get_translations(db: Session, skip: int = 0, limit: int = 100):
     logger.debug(f"Fetching translations with skip={skip}, limit={limit}")
-    return db.query(Translation).offset(skip).limit(limit).all()
+    return db.query(Translation).options(
+        joinedload(Translation.language)
+    ).offset(skip).limit(limit).all()
 
 def get_translations_paginated(
     db: Session,
     page: int = 1,
     page_size: int = 10,
-    filters: List[Filter] = None,
+    identifier_filter: str = None,
+    text_filter: str = None,
+    language_filter_values: List[str] = None,
     sort_field: str = None,
     sort_order: str = "asc"
 ) -> Tuple[List[Translation], int]:
-    query = db.query(Translation)
+    """
+    Get paginated list of translations with filters.
+    """
+    # Start with a base query that includes the language relationship
+    query = db.query(Translation).options(joinedload(Translation.language))
     
-    # Separate language filters from other filters
-    language_filter_values = []
-    other_filters = []
+    # Apply filters
+    if identifier_filter:
+        query = query.filter(Translation.identifier.ilike(f"%{identifier_filter}%"))
     
-    if filters:
-        for filter_item in filters:
-            if filter_item.field == "language" or filter_item.field == "languages":
-                logger.debug(f"Found language filter with value: {filter_item.value}")
-                language_filter_values.append(filter_item.value)
-            elif hasattr(Translation, filter_item.field):
-                column = getattr(Translation, filter_item.field)
-                if filter_item.operator == "contains":
-                    other_filters.append(column.ilike(f"%{filter_item.value}%"))
-                elif filter_item.operator == "equals":
-                    other_filters.append(column == filter_item.value)
-                elif filter_item.operator == "startsWith":
-                    other_filters.append(column.ilike(f"{filter_item.value}%"))
-                elif filter_item.operator == "endsWith":
-                    other_filters.append(column.ilike(f"%{filter_item.value}"))
-    
-    if other_filters:
-        query = query.filter(*other_filters)
+    if text_filter:
+        query = query.filter(Translation.text.ilike(f"%{text_filter}%"))
     
     if language_filter_values:
-        logger.debug(f"Filtering by languages: {language_filter_values}")
-        # Join with languages and apply OR logic: include translations that have any of the selected languages
-        conditions = [Language.id == int(lang_id) for lang_id in language_filter_values]
-        query = query.join(Translation.language).filter(or_(*conditions)).distinct()
+        # Convert string IDs to integers and validate
+        language_ids = []
+        for lang_id in language_filter_values:
+            try:
+                language_ids.append(int(lang_id))
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid language ID: {lang_id}")
+                continue
+        
+        if language_ids:
+            # Join with the language relationship and filter
+            # Use the many-to-many relationship
+            query = query.join(Translation.language).filter(Language.id.in_(language_ids))
     
+    # Apply sorting
+    if sort_field:
+        if sort_field == 'language':
+            # Sort by the language name
+            query = query.join(Translation.language).order_by(
+                desc(Language.name) if sort_order == 'desc' else asc(Language.name)
+            )
+        else:
+            sort_column = getattr(Translation, sort_field, None)
+            if sort_column is not None:
+                query = query.order_by(desc(sort_column) if sort_order == 'desc' else asc(sort_column))
+    else:
+        # Default sorting by id
+        query = query.order_by(Translation.id)
+    
+    # Get total count before pagination
     total = query.count()
     
-    if sort_field and hasattr(Translation, sort_field):
-        sort_func = asc if sort_order == "asc" else desc
-        query = query.order_by(sort_func(getattr(Translation, sort_field)))
+    # Apply pagination
+    query = query.offset((page - 1) * page_size).limit(page_size)
     
-    offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size)
+    # Execute query and return results
+    translations = query.all()
+    logger.debug(f"Found {len(translations)} translations matching filters")
     
-    return query.all(), total
+    return translations, total
