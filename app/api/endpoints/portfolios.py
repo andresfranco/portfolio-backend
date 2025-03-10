@@ -4,71 +4,125 @@ from typing import Any, List, Optional
 import os
 import uuid
 from datetime import datetime
-
-from app import crud, models, schemas
+from app.crud import portfolio as portfolio_crud
+from app.schemas.portfolio import PortfolioOut as Portfolio,PaginatedPortfolioResponse,PortfolioCreate,PortfolioUpdate,PortfolioImageOut
+from app.models.portfolio import Portfolio as PortfolioModel
 from app.api import deps
-from app.utils import check_admin_access
 from app.core.config import settings
+import logging
+import sys
 
 router = APIRouter()
+# Set up logging
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
 
-@router.get("/", response_model=schemas.PaginatedResponse[schemas.Portfolio])
-def read_portfolios(
+
+@router.get("/", response_model=List[str])
+def list_portfolio_names(
     db: Session = Depends(deps.get_db),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    sort_field: Optional[str] = None,
-    sort_order: Optional[str] = "asc",
-    filters: Optional[List[schemas.portfolio.Filter]] = None,
-    current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
-    Retrieve portfolios with pagination.
+    Get list of all portfolios.
     """
-    check_admin_access(current_user)
-    
-    portfolios, total = crud.portfolio.get_portfolios_paginated(
-        db, page=page, page_size=page_size, filters=filters, 
-        sort_field=sort_field, sort_order=sort_order
-    )
-    
-    return {
-        "items": portfolios,
-        "total": total,
-        "page": page,
-        "page_size": page_size
-    }
+    logger.debug("Fetching all portfolio names")
+    portfolios = portfolio_crud.get_portfolios(db)
+    return [portfolio.name for portfolio in portfolios]
 
 
-@router.post("/", response_model=schemas.Portfolio)
+@router.post("/", response_model=Portfolio)
 def create_portfolio(
     *,
     db: Session = Depends(deps.get_db),
-    portfolio_in: schemas.PortfolioCreate,
-    current_user: models.User = Depends(deps.get_current_active_user),
+    portfolio_in: PortfolioCreate,
 ) -> Any:
     """
     Create new portfolio.
     """
-    check_admin_access(current_user)
-    
-    portfolio = crud.portfolio.create_portfolio(db, portfolio=portfolio_in)
+    portfolio = portfolio_crud.create_portfolio(db, portfolio=portfolio_in)
     return portfolio
 
 
-@router.get("/{portfolio_id}", response_model=schemas.Portfolio)
+@router.get("/full", response_model=PaginatedPortfolioResponse)
+def read_portfolios_full(
+    page: int = Query(1, gt=0),
+    pageSize: int = Query(10, gt=0, le=100),
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    filterField: Optional[List[str]] = Query(None),
+    filterValue: Optional[List[str]] = Query(None),
+    filterOperator: Optional[List[str]] = Query(None),
+    sortField: Optional[str] = None,
+    sortOrder: Optional[str] = Query(None, regex="^(asc|desc)$"),
+    db: Session = Depends(deps.get_db),
+) -> Any:
+    """
+    Get paginated list of portfolios with full details.
+    Supports both direct parameters (name, description) and 
+    filter parameters (filterField, filterValue, filterOperator).
+    """
+    # Process filter parameters if they exist
+    name_filter = name
+    description_filter = description
+    
+    # If filter parameters are provided, use them instead of direct parameters
+    if filterField and filterValue:
+        for i, field in enumerate(filterField):
+            if i < len(filterValue):
+                if field == 'name' and not name_filter:
+                    name_filter = filterValue[i]
+                elif field == 'description' and not description_filter:
+                    description_filter = filterValue[i]
+    
+    try:
+        filters = []
+        
+        if name_filter:
+            filters.append(schemas.portfolio.Filter(field="name", value=name_filter, operator="contains"))
+        
+        if description_filter:
+            filters.append(schemas.portfolio.Filter(field="description", value=description_filter, operator="contains"))
+        
+        portfolios, total = portfolio_crud.get_portfolios_paginated(
+            db=db,
+            page=page,
+            page_size=pageSize,
+            filters=filters,
+            sort_field=sortField,
+            sort_order=sortOrder
+        )
+        
+        return {
+            "items": portfolios,
+            "total": total,
+            "page": page,
+            "pageSize": pageSize
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting portfolios: {str(e)}"
+        )
+
+
+
+
+@router.get("/{portfolio_id}", response_model=Portfolio)
 def read_portfolio(
     *,
     db: Session = Depends(deps.get_db),
     portfolio_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Get portfolio by ID.
     """
-    check_admin_access(current_user)
-    
     portfolio = crud.portfolio.get_portfolio(db, portfolio_id=portfolio_id)
     if not portfolio:
         raise HTTPException(
@@ -78,68 +132,59 @@ def read_portfolio(
     return portfolio
 
 
-@router.put("/{portfolio_id}", response_model=schemas.Portfolio)
+@router.put("/{portfolio_id}", response_model=Portfolio)
 def update_portfolio(
     *,
     db: Session = Depends(deps.get_db),
     portfolio_id: int,
-    portfolio_in: schemas.PortfolioUpdate,
-    current_user: models.User = Depends(deps.get_current_active_user),
+    portfolio_in: PortfolioUpdate,
 ) -> Any:
     """
     Update a portfolio.
     """
-    check_admin_access(current_user)
-    
-    portfolio = crud.portfolio.get_portfolio(db, portfolio_id=portfolio_id)
+    portfolio = portfolio_crud.get_portfolio(db, portfolio_id=portfolio_id)
     if not portfolio:
         raise HTTPException(
             status_code=404,
             detail="Portfolio not found",
         )
     
-    portfolio = crud.portfolio.update_portfolio(db, portfolio_id=portfolio_id, portfolio=portfolio_in)
+    portfolio = portfolio_crud.update_portfolio(db, portfolio_id=portfolio_id, portfolio=portfolio_in)
     return portfolio
 
 
-@router.delete("/{portfolio_id}", response_model=schemas.Portfolio)
+@router.delete("/{portfolio_id}", response_model=Portfolio)
 def delete_portfolio(
     *,
     db: Session = Depends(deps.get_db),
     portfolio_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Delete a portfolio.
     """
-    check_admin_access(current_user)
-    
-    portfolio = crud.portfolio.get_portfolio(db, portfolio_id=portfolio_id)
+    portfolio = portfolio_crud.get_portfolio(db, portfolio_id=portfolio_id)
     if not portfolio:
         raise HTTPException(
             status_code=404,
             detail="Portfolio not found",
         )
     
-    portfolio = crud.portfolio.delete_portfolio(db, portfolio_id=portfolio_id)
+    portfolio = portfolio_crud.delete_portfolio(db, portfolio_id=portfolio_id)
     return portfolio
 
 
-@router.post("/{portfolio_id}/images", response_model=schemas.PortfolioImage)
+@router.post("/{portfolio_id}/images", response_model=PortfolioImageOut)
 async def upload_portfolio_image(
     *,
     db: Session = Depends(deps.get_db),
     portfolio_id: int,
     category: str = Query(..., description="Image category"),
     file: UploadFile = File(...),
-    current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Upload an image for a portfolio.
     """
-    check_admin_access(current_user)
-    
-    portfolio = crud.portfolio.get_portfolio(db, portfolio_id=portfolio_id)
+    portfolio = portfolio_crud.get_portfolio(db, portfolio_id=portfolio_id)
     if not portfolio:
         raise HTTPException(
             status_code=404,
@@ -176,34 +221,31 @@ async def upload_portfolio_image(
     return portfolio_image
 
 
-@router.delete("/{portfolio_id}/images/{image_id}", response_model=schemas.PortfolioImage)
+@router.delete("/{portfolio_id}/images/{image_id}", response_model=PortfolioImageOut)
 def delete_portfolio_image(
     *,
     db: Session = Depends(deps.get_db),
     portfolio_id: int,
     image_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Delete a portfolio image.
     """
-    check_admin_access(current_user)
-    
-    portfolio = crud.portfolio.get_portfolio(db, portfolio_id=portfolio_id)
+    portfolio = portfolio_crud.get_portfolio(db, portfolio_id=portfolio_id)
     if not portfolio:
         raise HTTPException(
             status_code=404,
             detail="Portfolio not found",
         )
     
-    portfolio_image = crud.portfolio.delete_portfolio_image(db, image_id=image_id)
+    portfolio_image = portfolio_crud.delete_portfolio_image(db, image_id=image_id)
     if not portfolio_image:
         raise HTTPException(
             status_code=404,
             detail="Portfolio image not found",
         )
     
-    # Delete the file if it exists
+    # Delete the file from the filesystem
     if portfolio_image.image_path:
         file_path = os.path.join(settings.STATIC_DIR, portfolio_image.image_path)
         if os.path.exists(file_path):
