@@ -6,6 +6,7 @@ from app.core.database import Base
 class Experience(Base):
     __tablename__ = "experiences"
     id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, index=True)
     years = Column(Integer)
     
     # Timestamp and user tracking fields

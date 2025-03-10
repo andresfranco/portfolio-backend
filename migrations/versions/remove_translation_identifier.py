@@ -7,6 +7,7 @@ Create Date: 2025-03-10 14:30:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.engine.reflection import Inspector
 
 
 # revision identifiers, used by Alembic.
@@ -17,11 +18,26 @@ depends_on = None
 
 
 def upgrade():
-    # Remove the translation_identifier column from the sections table
-    op.drop_column('sections', 'translation_identifier')
+    # Get the SQLAlchemy connection
+    conn = op.get_bind()
+    
+    # Get an inspector to check the schema
+    inspector = Inspector.from_engine(conn)
+    
+    # Check if the column exists before trying to drop it
+    columns = [col['name'] for col in inspector.get_columns('sections')]
+    if 'translation_identifier' in columns:
+        # Remove the translation_identifier column from the sections table
+        op.drop_column('sections', 'translation_identifier')
 
 
 def downgrade():
     # Add the translation_identifier column back to the sections table
-    op.add_column('sections', sa.Column('translation_identifier', sa.String(), nullable=True))
-    op.create_index(op.f('ix_sections_translation_identifier'), 'sections', ['translation_identifier'], unique=False)
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    
+    # Check if the column doesn't exist before adding it
+    columns = [col['name'] for col in inspector.get_columns('sections')]
+    if 'translation_identifier' not in columns:
+        op.add_column('sections', sa.Column('translation_identifier', sa.String(), nullable=True))
+        op.create_index(op.f('ix_sections_translation_identifier'), 'sections', ['translation_identifier'], unique=False)
