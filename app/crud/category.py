@@ -33,19 +33,10 @@ def create_category(db: Session, category: CategoryCreate):
     # Create the category
     db_category = Category(
         code=category.code,
-        type=category.type
+        type_code=category.type_code
     )
     db.add(db_category)
     db.flush()  # Flush to get the category ID
-    
-    # Add skills if provided
-    if category.skills:
-        skills = db.query(Skill).filter(Skill.id.in_(category.skills)).all()
-        if len(skills) != len(category.skills):
-            missing_skills = set(category.skills) - {skill.id for skill in skills}
-            logger.error(f"Invalid skill IDs: {missing_skills}")
-            raise ValueError(f"Invalid skill IDs: {missing_skills}")
-        db_category.skills = skills
     
     # Create category texts
     for text_data in category.category_texts:
@@ -63,7 +54,13 @@ def create_category(db: Session, category: CategoryCreate):
         )
         db.add(db_category_text)
     
-    logger.debug("Category added to session")
+    # Commit the transaction to ensure data is saved to the database
+    db.commit()
+    logger.debug(f"Category created successfully with ID: {db_category.id}")
+    
+    # Refresh the category object to ensure all relationships are loaded
+    db.refresh(db_category)
+    
     return db_category
 
 def update_category(db: Session, category_id: int, category: CategoryUpdate):
@@ -76,25 +73,24 @@ def update_category(db: Session, category_id: int, category: CategoryUpdate):
     # Update fields if provided
     if category.code is not None:
         db_category.code = category.code
-    
-    if category.type is not None:
-        db_category.type = category.type
-    
-    # Update skills if provided
-    if category.skills is not None:
-        skills = db.query(Skill).filter(Skill.id.in_(category.skills)).all()
-        if len(skills) != len(category.skills):
-            missing_skills = set(category.skills) - {skill.id for skill in skills}
-            logger.error(f"Invalid skill IDs: {missing_skills}")
-            raise ValueError(f"Invalid skill IDs: {missing_skills}")
-        db_category.skills = skills
+    if category.type_code is not None:
+        db_category.type_code = category.type_code
     
     # Update category texts if provided
     if category.category_texts is not None:
-        # First, remove existing texts
-        db.query(CategoryText).filter(CategoryText.category_id == category_id).delete()
+        # First, get existing texts to determine which ones to remove
+        existing_texts = db.query(CategoryText).filter(CategoryText.category_id == category_id).all()
+        existing_lang_ids = {text.language_id for text in existing_texts}
         
-        # Then add new texts
+        # Process removed language IDs
+        if category.removed_language_ids:
+            for lang_id in category.removed_language_ids:
+                db.query(CategoryText).filter(
+                    CategoryText.category_id == category_id,
+                    CategoryText.language_id == lang_id
+                ).delete()
+        
+        # Process new or updated texts
         for text_data in category.category_texts:
             # Verify language exists
             language = db.query(Language).filter(Language.id == text_data.language_id).first()
@@ -102,13 +98,31 @@ def update_category(db: Session, category_id: int, category: CategoryUpdate):
                 logger.error(f"Invalid language ID: {text_data.language_id}")
                 raise ValueError(f"Invalid language ID: {text_data.language_id}")
             
-            db_category_text = CategoryText(
-                category_id=db_category.id,
-                language_id=text_data.language_id,
-                name=text_data.name,
-                description=text_data.description
-            )
-            db.add(db_category_text)
+            # Check if text for this language already exists
+            existing_text = db.query(CategoryText).filter(
+                CategoryText.category_id == category_id,
+                CategoryText.language_id == text_data.language_id
+            ).first()
+            
+            if existing_text:
+                # Update existing text
+                if text_data.name is not None:
+                    existing_text.name = text_data.name
+                if text_data.description is not None:
+                    existing_text.description = text_data.description
+            else:
+                # Create new text
+                new_text = CategoryText(
+                    category_id=category_id,
+                    language_id=text_data.language_id,
+                    name=text_data.name,
+                    description=text_data.description
+                )
+                db.add(new_text)
+    
+    db.commit()
+    db.refresh(db_category)
+    logger.debug(f"Category updated successfully: {category_id}")
     
     return db_category
 
@@ -119,20 +133,19 @@ def delete_category(db: Session, category_id: int):
     if not db_category:
         return None
     
-    # Delete associated texts
-    db.query(CategoryText).filter(CategoryText.category_id == category_id).delete()
-    
-    # Delete the category
+    # Delete the category (cascade will handle texts)
     db.delete(db_category)
+    db.commit()
+    
+    logger.debug(f"Category deleted successfully: {category_id}")
     return db_category
 
 def get_categories(db: Session, skip: int = 0, limit: int = 100):
-    logger.debug(f"Fetching categories with skip={skip}, limit={limit}")
     return db.query(Category).offset(skip).limit(limit).all()
 
 def get_categories_by_type(db: Session, category_type: str, skip: int = 0, limit: int = 100):
-    logger.debug(f"Fetching categories of type {category_type} with skip={skip}, limit={limit}")
-    return db.query(Category).filter(Category.type == category_type).offset(skip).limit(limit).all()
+    logger.debug(f"Fetching categories with type {category_type}")
+    return db.query(Category).filter(Category.type_code == category_type).offset(skip).limit(limit).all()
 
 def get_categories_paginated(
     db: Session,
@@ -142,71 +155,102 @@ def get_categories_paginated(
     sort_field: str = None,
     sort_order: str = "asc"
 ) -> Tuple[List[Category], int]:
+    """
+    Get paginated list of categories with optional filtering and sorting.
+    
+    Args:
+        db: Database session
+        page: Page number (1-indexed)
+        page_size: Number of items per page
+        filters: List of filter conditions
+        sort_field: Field to sort by
+        sort_order: Sort direction ("asc" or "desc")
+        
+    Returns:
+        Tuple of (list of categories, total count)
+    """
+    logger.debug(f"Getting paginated categories with page={page}, page_size={page_size}, filters={filters}, sort_field={sort_field}, sort_order={sort_order}")
+    
+    # Start with base query
     query = db.query(Category)
     
-    # Separate skill and text filters from other filters
-    skill_filter_values = []
-    text_filters = []
-    other_filters = []
-    
+    # Apply filters if provided
     if filters:
         for filter_item in filters:
-            if filter_item.field == "skill" or filter_item.field == "skills":
-                logger.debug(f"Found skill filter with value: {filter_item.value}")
-                skill_filter_values.append(filter_item.value)
-            elif filter_item.field == "name" or filter_item.field == "description":
-                text_filters.append(filter_item)
-            elif hasattr(Category, filter_item.field):
-                column = getattr(Category, filter_item.field)
+            if filter_item.field == "code":
                 if filter_item.operator == "contains":
-                    other_filters.append(column.ilike(f"%{filter_item.value}%"))
+                    query = query.filter(Category.code.ilike(f"%{filter_item.value}%"))
                 elif filter_item.operator == "equals":
-                    other_filters.append(column == filter_item.value)
+                    query = query.filter(Category.code == filter_item.value)
                 elif filter_item.operator == "startsWith":
-                    other_filters.append(column.ilike(f"{filter_item.value}%"))
+                    query = query.filter(Category.code.ilike(f"{filter_item.value}%"))
                 elif filter_item.operator == "endsWith":
-                    other_filters.append(column.ilike(f"%{filter_item.value}"))
+                    query = query.filter(Category.code.ilike(f"%{filter_item.value}"))
+            elif filter_item.field == "type":
+                if filter_item.operator == "contains":
+                    query = query.filter(Category.type_code.ilike(f"%{filter_item.value}%"))
+                elif filter_item.operator == "equals":
+                    query = query.filter(Category.type_code == filter_item.value)
+                elif filter_item.operator == "startsWith":
+                    query = query.filter(Category.type_code.ilike(f"{filter_item.value}%"))
+                elif filter_item.operator == "endsWith":
+                    query = query.filter(Category.type_code.ilike(f"%{filter_item.value}"))
+            elif filter_item.field == "name" or filter_item.field == "description":
+                # These fields are in the texts table, so we need to join
+                query = query.join(CategoryText)
+                
+                if filter_item.operator == "contains":
+                    if filter_item.field == "name":
+                        query = query.filter(CategoryText.name.ilike(f"%{filter_item.value}%"))
+                    else:  # description
+                        query = query.filter(CategoryText.description.ilike(f"%{filter_item.value}%"))
+                elif filter_item.operator == "equals":
+                    if filter_item.field == "name":
+                        query = query.filter(CategoryText.name == filter_item.value)
+                    else:  # description
+                        query = query.filter(CategoryText.description == filter_item.value)
+            elif filter_item.field == "language_id":
+                # Filter by language ID
+                query = query.join(CategoryText)
+                query = query.filter(CategoryText.language_id == filter_item.value)
     
-    if other_filters:
-        query = query.filter(*other_filters)
-    
-    # Apply skill filters
-    if skill_filter_values:
-        logger.debug(f"Filtering by skills: {skill_filter_values}")
-        conditions = [Skill.id == int(skill_id) for skill_id in skill_filter_values]
-        query = query.join(Category.skills).filter(or_(*conditions)).distinct()
-    
-    # Apply text filters
-    if text_filters:
-        for filter_item in text_filters:
-            # Join with CategoryText to filter by name or description
-            query = query.join(CategoryText)
-            column = getattr(CategoryText, filter_item.field)
-            if filter_item.operator == "contains":
-                query = query.filter(column.ilike(f"%{filter_item.value}%"))
-            elif filter_item.operator == "equals":
-                query = query.filter(column == filter_item.value)
-            elif filter_item.operator == "startsWith":
-                query = query.filter(column.ilike(f"{filter_item.value}%"))
-            elif filter_item.operator == "endsWith":
-                query = query.filter(column.ilike(f"%{filter_item.value}"))
-            query = query.distinct()
-    
+    # Get total count before pagination
     total = query.count()
     
+    # Apply sorting if provided
     if sort_field:
-        if hasattr(Category, sort_field):
-            sort_func = asc if sort_order == "asc" else desc
-            query = query.order_by(sort_func(getattr(Category, sort_field)))
-        elif sort_field in ["name", "description"]:
-            # Sort by name or description in the default language
-            default_language = db.query(Language).filter(Language.is_default == True).first()
-            if default_language:
-                query = query.join(CategoryText).filter(CategoryText.language_id == default_language.id)
-                sort_func = asc if sort_order == "asc" else desc
-                query = query.order_by(sort_func(getattr(CategoryText, sort_field)))
+        if sort_field == "code":
+            sort_column = Category.code
+        elif sort_field == "type":
+            sort_column = Category.type_code
+        elif sort_field == "name":
+            # Join with texts table if not already joined
+            if not any(isinstance(join, tuple) and join[0] == CategoryText for join in query._joins):
+                query = query.join(CategoryText)
+            sort_column = CategoryText.name
+        elif sort_field == "description":
+            # Join with texts table if not already joined
+            if not any(isinstance(join, tuple) and join[0] == CategoryText for join in query._joins):
+                query = query.join(CategoryText)
+            sort_column = CategoryText.description
+        else:
+            # Default to id if sort field is not recognized
+            sort_column = Category.id
+        
+        if sort_order.lower() == "desc":
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+    else:
+        # Default sort by id
+        query = query.order_by(asc(Category.id))
     
+    # Apply pagination
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     
-    return query.all(), total
+    # Execute query
+    categories = query.all()
+    
+    logger.debug(f"Retrieved {len(categories)} categories out of {total} total")
+    return categories, total

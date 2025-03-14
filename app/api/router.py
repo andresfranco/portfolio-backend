@@ -11,6 +11,7 @@ from app.api.endpoints import (
     experiences,
     projects,
     categories,
+    category_types,
     skills,
     email
 )
@@ -33,4 +34,5 @@ api_router.include_router(sections.router, prefix="/sections", tags=["Sections"]
 api_router.include_router(experiences.router, prefix="/experiences", tags=["Experiences"])
 api_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 api_router.include_router(categories.router, prefix="/categories", tags=["Categories"])
+api_router.include_router(category_types.router, prefix="/category-types", tags=["Category Types"])
 api_router.include_router(skills.router, prefix="/skills", tags=["Skills"])

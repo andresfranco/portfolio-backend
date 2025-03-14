@@ -15,7 +15,7 @@ class Category(Base):
     __tablename__ = "categories"
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, index=True)
-    type = Column(String)  # e.g., "skill", "project"
+    type_code = Column(String(5), ForeignKey("category_types.code"))
     
     # Timestamp and user tracking fields
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -28,6 +28,7 @@ class Category(Base):
     projects = relationship("Project", secondary="project_categories", back_populates="categories")
     skills = relationship("Skill", secondary=category_skills, back_populates="categories")
     category_texts = relationship("CategoryText", back_populates="category")
+    category_type = relationship("CategoryType")
 
 
 class CategoryText(Base):

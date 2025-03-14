@@ -23,6 +23,17 @@ def get_skill(db: Session, skill_id: int):
     logger.debug(f"Fetching skill with ID {skill_id}")
     return db.query(Skill).filter(Skill.id == skill_id).first()
 
+# Added function to get skill by name and language
+def get_skill_by_name_and_language(db: Session, name: str, language_id: int):
+    """
+    Get a skill by name in a specific language
+    """
+    logger.debug(f"Fetching skill with name '{name}' for language ID {language_id}")
+    return db.query(Skill).join(SkillText).filter(
+        SkillText.name == name,
+        SkillText.language_id == language_id
+    ).first()
+
 def create_skill(db: Session, skill: SkillCreate):
     logger.debug(f"Starting skill creation with type {skill.type}")
     
@@ -130,8 +141,11 @@ def get_skills_paginated(
     page_size: int = 10,
     filters: List[Filter] = None,
     sort_field: str = None,
-    sort_order: str = "asc"
+    sort_order: str = "asc",
+    type_filter: str = None,
+    name_filter: str = None
 ) -> Tuple[List[Skill], int]:
+    logger.debug(f"Getting paginated skills with filters: type={type_filter}, name={name_filter}")
     query = db.query(Skill)
     
     # Separate category and text filters from other filters
@@ -156,6 +170,18 @@ def get_skills_paginated(
                     other_filters.append(column.ilike(f"{filter_item.value}%"))
                 elif filter_item.operator == "endsWith":
                     other_filters.append(column.ilike(f"%{filter_item.value}"))
+    
+    # Apply direct type filter if provided
+    if type_filter:
+        logger.debug(f"Applying direct type filter: {type_filter}")
+        other_filters.append(Skill.type.ilike(f"%{type_filter}%"))
+    
+    # Apply direct name filter if provided
+    if name_filter:
+        logger.debug(f"Applying direct name filter: {name_filter}")
+        query = query.join(SkillText)
+        query = query.filter(SkillText.name.ilike(f"%{name_filter}%"))
+        query = query.distinct()
     
     if other_filters:
         query = query.filter(*other_filters)
@@ -182,8 +208,11 @@ def get_skills_paginated(
                 query = query.filter(column.ilike(f"%{filter_item.value}"))
             query = query.distinct()
     
+    # Get the total count before applying pagination
     total = query.count()
+    logger.debug(f"Total matching skills: {total}")
     
+    # Apply sorting if specified
     if sort_field:
         if hasattr(Skill, sort_field):
             sort_func = asc if sort_order == "asc" else desc
@@ -196,6 +225,7 @@ def get_skills_paginated(
                 sort_func = asc if sort_order == "asc" else desc
                 query = query.order_by(sort_func(getattr(SkillText, sort_field)))
     
+    # Apply pagination
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     

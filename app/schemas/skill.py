@@ -55,3 +55,9 @@ class PaginatedSkillResponse(BaseModel):
     total: int
     page: int
     pageSize: int
+
+# Added UniqueCheckResponse for the check-unique endpoint
+class UniqueCheckResponse(BaseModel):
+    exists: bool
+    name: str
+    language_id: int
