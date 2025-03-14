@@ -79,6 +79,11 @@ def read_categories_full(
         sort_order=sortOrder
     )
     
+    # Ensure all categories have a valid type_code
+    for category in categories:
+        if category.type_code is None:
+            category.type_code = "GEN"
+    
     response = {
         "items": categories,
         "total": total,

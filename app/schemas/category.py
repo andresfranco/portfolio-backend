@@ -25,7 +25,7 @@ class CategoryTextOut(CategoryTextBase):
 
 class CategoryBase(BaseModel):
     code: str
-    type_code: str
+    type_code: str = "GEN"
 
 class CategoryCreate(CategoryBase):
     category_texts: List[CategoryTextCreate]

@@ -15,7 +15,7 @@ class Category(Base):
     __tablename__ = "categories"
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, index=True)
-    type_code = Column(String(5), ForeignKey("category_types.code"))
+    type_code = Column(String(5), ForeignKey("category_types.code"), default="GEN")
     
     # Timestamp and user tracking fields
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import asc, desc, or_, func, case
 from app.models.category import Category, CategoryText
 from app.models.skill import Skill
 from app.models.language import Language
@@ -145,6 +145,11 @@ def get_categories(db: Session, skip: int = 0, limit: int = 100):
 
 def get_categories_by_type(db: Session, category_type: str, skip: int = 0, limit: int = 100):
     logger.debug(f"Fetching categories with type {category_type}")
+    
+    # Update any NULL type_code values to 'GEN'
+    db.query(Category).filter(Category.type_code.is_(None)).update({Category.type_code: 'GEN'}, synchronize_session=False)
+    db.commit()
+    
     return db.query(Category).filter(Category.type_code == category_type).offset(skip).limit(limit).all()
 
 def get_categories_paginated(
@@ -171,8 +176,12 @@ def get_categories_paginated(
     """
     logger.debug(f"Getting paginated categories with page={page}, page_size={page_size}, filters={filters}, sort_field={sort_field}, sort_order={sort_order}")
     
-    # Start with base query
+    # Start with base query, ensuring type_code is never NULL
     query = db.query(Category)
+    
+    # Update any NULL type_code values to 'GEN'
+    db.query(Category).filter(Category.type_code.is_(None)).update({Category.type_code: 'GEN'}, synchronize_session=False)
+    db.commit()
     
     # Apply filters if provided
     if filters:
@@ -186,7 +195,7 @@ def get_categories_paginated(
                     query = query.filter(Category.code.ilike(f"{filter_item.value}%"))
                 elif filter_item.operator == "endsWith":
                     query = query.filter(Category.code.ilike(f"%{filter_item.value}"))
-            elif filter_item.field == "type":
+            elif filter_item.field == "type" or filter_item.field == "type_code":
                 if filter_item.operator == "contains":
                     query = query.filter(Category.type_code.ilike(f"%{filter_item.value}%"))
                 elif filter_item.operator == "equals":
@@ -221,7 +230,7 @@ def get_categories_paginated(
     if sort_field:
         if sort_field == "code":
             sort_column = Category.code
-        elif sort_field == "type":
+        elif sort_field == "type" or sort_field == "type_code":
             sort_column = Category.type_code
         elif sort_field == "name":
             # Join with texts table if not already joined
